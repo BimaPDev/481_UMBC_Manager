@@ -1,2 +1,3 @@
-server/generator.py
 server/token.json
+server/credentials.json
+server/state.json

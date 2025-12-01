@@ -1,124 +1,180 @@
-import os   # Bima Worked On this
-import io   # Bima Worked On this
-from fastapi import FastAPI, HTTPException   # Bima Worked On this
-from fastapi.middleware.cors import CORSMiddleware   # Bima Worked On this
-from fastapi.responses import StreamingResponse   # Bima Worked On this
-from google.oauth2.credentials import Credentials   # Bima Worked On this
-from google_auth_oauthlib.flow import InstalledAppFlow   # Bima Worked On this
-from google.auth.transport.requests import Request   # Bima Worked On this
-from googleapiclient.discovery import build   # Bima Worked On this
-import generator    # Bima Worked On this
-   # Bima Worked On this
-app = FastAPI()   # Bima Worked On this
+import os
+import io
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+import generator
 
-# --- CONFIGURATION ---     #Bima Worked on this
-app.add_middleware( #Bima Worked on this
-    CORSMiddleware, #Bima Worked on this
-    allow_origins=["http://localhost:5173"],    #Bima Worked on this
-    allow_credentials=True, #Bima Worked on this
-    allow_methods=["*"],    #Bima Worked on this
-    allow_headers=["*"],    #Bima Worked on this
-)   #Bima Worked on this
-    #Bima Worked on this
-SCOPES = [  #Bima Worked on this
-    "https://www.googleapis.com/auth/drive",    #Bima Worked on this
-    "https://www.googleapis.com/auth/spreadsheets", #Bima Worked on this
-    "https://www.googleapis.com/auth/documents",    #Bima Worked on this
-    "https://www.googleapis.com/auth/forms.responses.readonly", #Bima Worked on this
-]   #Bima Worked on this
-    #Bima Worked on this
-# TARGET FOLDER ID (Must match generator.py)    #Bima Worked on this
-TARGET_FOLDER_ID = "1XHoiWkH7x3YtoQiMQbE-vavkCooctjnr"  #Bima Worked on this
-    #Bima Worked on this
-# --- AUTH HELPER ---   #Bima Worked on this
-def get_creds():    #Bima Worked on this
-    creds = None    #Bima Worked on this
-    if os.path.exists("token.json"):    #Bima Worked on this
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES) #Bima Worked on this
-    if not creds or not creds.valid:    #Bima Worked on this
-        if creds and creds.expired and creds.refresh_token: #Bima Worked on this
-            creds.refresh(Request())    #Bima Worked on this
-        else:   #Bima Worked on this
-            # Requires credentials.json to be in the backend folder #Bima Worked on this
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)    #Bima Worked on this
-            creds = flow.run_local_server(port=8080)    #Bima Worked on this
-        with open("token.json", "w") as f:  #Bima Worked on this
-            f.write(creds.to_json())    #Bima Worked on this
-    return creds    #Bima Worked on this
-    #Bima Worked on this
-# --- ENDPOINT 1: SEARCH ---    #Bima Worked on this
-@app.get("/search") #Bima Worked on this
-def search_docs(query: str):    #Bima Worked on this
-    if not query: return [] #Bima Worked on this
-    creds = get_creds() #Bima Worked on this
-    service = build("drive", "v3", credentials=creds)   #Bima Worked on this
-    safe_query = query.replace("'", "\\'")  #Bima Worked on this
-        #Bima Worked on this
-    # Logic: Search Name/Content BUT ONLY inside TARGET_FOLDER_ID   #Bima Worked on this
-    drive_query = ( #Bima Worked on this
-        f"'{TARGET_FOLDER_ID}' in parents " #Bima Worked on this
-        f"and (name contains '{safe_query}' or fullText contains '{safe_query}') "  #Bima Worked on this
-        "and mimeType = 'application/vnd.google-apps.document' "    #Bima Worked on this
-        "and trashed = false"   #Bima Worked on this
-    )   #Bima Worked on this
-    #Bima Worked on this
-    results = service.files().list( #Bima Worked on this
-        q=drive_query,  #Bima Worked on this
-        pageSize=10,    #Bima Worked on this
-        fields="nextPageToken, files(id, name, webViewLink, createdTime)"   #Bima Worked on this
-    ).execute() #Bima Worked on this
-    #Bima Worked on this
-    return results.get("files", []) #Bima Worked on this
-    #Bima Worked on this
-# --- ENDPOINT 2: SYNC (GENERATE DOCS) ---  #Bima Worked on this
-@app.post("/sync")  #Bima Worked on this
-def trigger_sync(): #Bima Worked on this
-    """ #Bima Worked on this
-    Checks Google Forms for new submissions and creates Docs for them.  #Bima Worked on this
-    """ #Bima Worked on this
-    creds = get_creds() #Bima Worked on this
-    # Calls the logic inside generator.py   #Bima Worked on this
-    result = generator.process_and_create_docs(creds)   #Bima Worked on this
-    return result   #Bima Worked on this
-    #Bima Worked on this
-# --- ENDPOINT 3: EXPORT (DOWNLOAD) --- #Bima Worked on this
-@app.get("/export/{file_id}")   #Bima Worked on this
-def export_doc(file_id: str, mime_type: str):   #Bima Worked on this
-    """ #Bima Worked on this
-    Exports a Google Doc as PDF or DOCX and streams it to the client.   #Bima Worked on this
-    """ #Bima Worked on this
-    creds = get_creds() #Bima Worked on this
-    service = build("drive", "v3", credentials=creds)   #Bima Worked on this
-    #Bima Worked on this
-    # Map simple names to Google MIME types #Bima Worked on this
-    mime_map = {    #Bima Worked on this
-        "pdf": "application/pdf",   #Bima Worked on this
-        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"   #Bima Worked on this
-    }   #Bima Worked on this
-        #Bima Worked on this
-    google_mime = mime_map.get(mime_type)   #Bima Worked on this
-    if not google_mime: #Bima Worked on this
-        raise HTTPException(status_code=400, detail="Unsupported format")   #Bima Worked on this
-    #Bima Worked on this
-    try:    #Bima Worked on this
-        # Request the export from Google    #Bima Worked on this
-        request = service.files().export_media(fileId=file_id, mimeType=google_mime)    #Bima Worked on this
-        file_stream = io.BytesIO()  #Bima Worked on this
-        downloader = request.execute() # Executes and returns raw bytes #Bima Worked on this
-            #Bima Worked on this
-        file_stream.write(downloader)   #Bima Worked on this
-        file_stream.seek(0) #Bima Worked on this
-            #Bima Worked on this
-        # Set filename for download #Bima Worked on this
-        filename = f"document.{mime_type}"  #Bima Worked on this
-        headers = {'Content-Disposition': f'attachment; filename="{filename}"'} #Bima Worked on this
-            #Bima Worked on this
-        return StreamingResponse(file_stream, media_type=google_mime, headers=headers)  #Bima Worked on this
-            #Bima Worked on this
-    except Exception as e:  #Bima Worked on this
-        print(f"Export Error: {e}") #Bima Worked on this
-        raise HTTPException(status_code=500, detail=str(e)) #Bima Worked on this
-    #Bima Worked on this
-if __name__ == "__main__":  #Bima Worked on this
-    import uvicorn  #Bima Worked on this
-    uvicorn.run(app, host="0.0.0.0", port=8000) #Bima Worked on this
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/forms.responses.readonly",
+    "https://www.googleapis.com/auth/forms.body.readonly",
+]
+
+FOLDER_NAME = "CMSC-447-CS-Preadvising"
+
+# --- AUTH HELPER ---
+def get_creds():
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Requires credentials.json to be in the backend folder
+            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            creds = flow.run_local_server(port=8080)
+        with open("token.json", "w") as f:
+            f.write(creds.to_json())
+    return creds
+
+def get_or_create_folder(service, folder_name):
+    # Check if folder exists
+    query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    results = service.files().list(q=query, fields="files(id)").execute()
+    files = results.get("files", [])
+    
+    if files:
+        return files[0]["id"]
+    else:
+        # Create folder
+        file_metadata = {
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder"
+        }
+        file = service.files().create(body=file_metadata, fields="id").execute()
+        return file.get("id")
+
+async def background_sync():
+    """Runs the sync process every 60 seconds."""
+    print("--- BACKGROUND SYNC STARTED ---")
+    while True:
+        try:
+            print("--- RUNNING SYNC ---")
+            # Run sync in a separate thread to avoid blocking the event loop
+            creds = get_creds()
+            service = build("drive", "v3", credentials=creds)
+            target_folder_id = get_or_create_folder(service, FOLDER_NAME)
+            
+            await asyncio.to_thread(generator.process_and_create_docs, creds, target_folder_id)
+            print("--- SYNC COMPLETE ---")
+        except Exception as e:
+            print(f"--- SYNC FAILED: {e} ---")
+        
+        await asyncio.sleep(60) # Wait for 60 seconds
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start background task
+    task = asyncio.create_task(background_sync())
+    yield
+    # Cancel task on shutdown
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        print("--- BACKGROUND SYNC STOPPED ---")
+
+app = FastAPI(lifespan=lifespan)
+
+# --- CONFIGURATION ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- ENDPOINT 1: SEARCH ---
+@app.get("/search")
+def search_docs(query: str):
+    if not query: return []
+    creds = get_creds()
+    service = build("drive", "v3", credentials=creds)
+    safe_query = query.replace("'", "\\'")
+    
+    target_folder_id = get_or_create_folder(service, FOLDER_NAME)
+
+    # Logic: Search Name BUT ONLY inside TARGET_FOLDER_ID
+    drive_query = (
+        f"'{target_folder_id}' in parents "
+        f"and name contains '{safe_query}' "
+        "and mimeType = 'application/vnd.google-apps.document' "
+        "and trashed = false"
+    )
+
+    results = service.files().list(
+        q=drive_query,
+        pageSize=10,
+        fields="nextPageToken, files(id, name, webViewLink, createdTime)"
+    ).execute()
+
+    return results.get("files", [])
+
+# --- ENDPOINT 2: SYNC (GENERATE DOCS) ---
+@app.post("/sync")
+def trigger_sync():
+    """
+    Checks Google Forms for new submissions and creates Docs for them.
+    """
+    creds = get_creds()
+    service = build("drive", "v3", credentials=creds)
+    target_folder_id = get_or_create_folder(service, FOLDER_NAME)
+    
+    # Calls the logic inside generator.py
+    result = generator.process_and_create_docs(creds, target_folder_id)
+    return result
+
+# --- ENDPOINT 3: EXPORT (DOWNLOAD) ---
+@app.get("/export/{file_id}")
+def export_doc(file_id: str, mime_type: str):
+    """
+    Exports a Google Doc as PDF or DOCX and streams it to the client.
+    """
+    creds = get_creds()
+    service = build("drive", "v3", credentials=creds)
+
+    # Map simple names to Google MIME types
+    mime_map = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    }
+
+    google_mime = mime_map.get(mime_type)
+    if not google_mime:
+        raise HTTPException(status_code=400, detail="Unsupported format")
+
+    try:
+        # Request the export from Google
+        request = service.files().export_media(fileId=file_id, mimeType=google_mime)
+        file_stream = io.BytesIO()
+        downloader = request.execute() # Executes and returns raw bytes
+
+        file_stream.write(downloader)
+        file_stream.seek(0)
+
+        # Set filename for download
+        filename = f"document.{mime_type}"
+        headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
+
+        return StreamingResponse(file_stream, media_type=google_mime, headers=headers)
+
+    except Exception as e:
+        print(f"Export Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    # Use "main:app" string to enable reload
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
