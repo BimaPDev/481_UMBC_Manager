@@ -3,6 +3,7 @@ import axios from "axios";
 import SearchBar from "./components/SearchBar";
 import ResultList from "./components/ResultList";
 import DocWorkspace from "./components/DocWorkspace";
+import SettingsPage from "./components/Settings";
 import { type DriveFile } from "./types";
 import "./App.css";
 
@@ -11,6 +12,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleSearch = async (query: string) => {
     setLoading(true);
@@ -31,10 +33,19 @@ function App() {
 
   return (
     <div style={{ padding: "20px", maxWidth: "1000px", margin: "0 auto" }}>
-      <h1>🎓 UMBC Plan Manager</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <h1>🎓 UMBC Plan Manager</h1>
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          style={{ padding: "8px 16px", cursor: "pointer" }}
+        >
+          {showSettings ? "Back to Home" : "Settings"}
+        </button>
+      </div>
 
-      {/* CONDITIONAL RENDERING: Show Workspace OR Search */}
-      {selectedFile ? (
+      {showSettings ? (
+        <SettingsPage />
+      ) : selectedFile ? (
         <DocWorkspace
           file={selectedFile}
           onBack={() => setSelectedFile(null)}

@@ -1,13 +1,10 @@
 from googleapiclient.discovery import build
 import json
 import os
+import config
 
 # --- CONFIG ---
-FORM_ID = "17aGxa61B0h_YjCJQAGLu4e0Q9kzLzt4eLzSevoi7M9Q"
-REF_SHEET_ID = "1QU-OSGOIW1yhGnI6KNyNwJPIj6EAL_AIZDHefVM0I0s"
-REF_SHEET_TAB = "Form Responses"
-TEMPLATE_DOC_ID = "1jqfnp7MuszXsgbosCCWWCs8AaZNyDKHa4n1zWthFRCg"
-OUTPUT_TITLE_PREFIX = "Computer Science 4 Year Plan: "
+# Loaded dynamically from config.py
 STATE_FILE = "state.json"
 
 def dbg(tag, obj):
@@ -35,8 +32,9 @@ def save_state(state):
 
 def fetch_form_structure(svc_forms):
     # 1. Get Form Structure to map IDs to Titles
+    cfg = config.load_config()
     try:
-        form = svc_forms.forms().get(formId=FORM_ID).execute()
+        form = svc_forms.forms().get(formId=cfg["FORM_ID"]).execute()
     except Exception as e:
         print(f"Error fetching form: {e}")
         return {}
@@ -50,11 +48,12 @@ def fetch_form_structure(svc_forms):
     return id_to_title
 
 def fetch_form_responses(svc_forms):
+    cfg = config.load_config()
     id_to_title = fetch_form_structure(svc_forms)
     
     # 2. Get Responses
     try:
-        resp = svc_forms.forms().responses().list(formId=FORM_ID).execute()
+        resp = svc_forms.forms().responses().list(formId=cfg["FORM_ID"]).execute()
     except Exception as e:
         print(f"Error fetching responses: {e}")
         return []
@@ -120,13 +119,15 @@ def process_and_create_docs(creds, folder_id):
 
     print("\n=== START SYNC ===")
     
+    cfg = config.load_config()
+    
     # Load state
     state = load_state()
     processed_ids = set(state.get("processed_ids", []))
     print(f"Loaded state: {len(processed_ids)} processed responses.")
     
     # Read Reference Sheet (as requested to keep track of things)
-    _, ref_rows = read_sheet_as_dicts(svc_sheets, REF_SHEET_ID, REF_SHEET_TAB)
+    _, ref_rows = read_sheet_as_dicts(svc_sheets, cfg["REF_SHEET_ID"], cfg["REF_SHEET_TAB"])
     print(f"Reference rows count: {len(ref_rows)}")
 
     responses = fetch_form_responses(svc_forms)
@@ -172,7 +173,7 @@ def process_and_create_docs(creds, folder_id):
         for k, v in replacements.items():
             extra = extra.replace(k, v)
     
-        new_title = f"{OUTPUT_TITLE_PREFIX}{last}, {name_display}"
+        new_title = f"{cfg['OUTPUT_TITLE_PREFIX']}{last}, {name_display}"
             
         # 4. Check if file exists specifically inside TARGET_FOLDER
         query = f"name = '{new_title}' and '{folder_id}' in parents and trashed = false"
@@ -185,7 +186,7 @@ def process_and_create_docs(creds, folder_id):
                 "name": new_title,
                 "parents": [folder_id]
             }
-            copied_file = svc_drive.files().copy(fileId=TEMPLATE_DOC_ID, body=copy_body).execute()
+            copied_file = svc_drive.files().copy(fileId=cfg['TEMPLATE_DOC_ID'], body=copy_body).execute()
             new_id = copied_file["id"]
     
             # 6. Insert Text
